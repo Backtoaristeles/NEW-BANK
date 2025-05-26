@@ -260,6 +260,51 @@ with st.form("add_tx", clear_on_submit=True):
         st.success(f"{ttype} for {user} added.")
         st.rerun()
 
+# -- Danger Zone: Delete Complete Wallet --
+st.markdown("---")
+st.markdown("<div style='color:red;font-weight:bold;'>🗑️ Danger Zone: Delete Complete Wallet</div>", unsafe_allow_html=True)
+st.warning(
+    "This will permanently remove ALL transactions for the selected user. "
+    "This action cannot be undone. Use with caution!"
+)
+
+# Get all users who currently have at least one transaction
+existing_users = sorted(st.session_state["transactions"]["User"].dropna().unique())
+
+if existing_users:
+    del_user = st.selectbox(
+        "Select wallet/user to delete completely", existing_users, key="delete_wallet_user"
+    )
+
+    # Step 2: Extra confirmation input
+    confirm = st.text_input(
+        f"Type the username '{del_user}' below to confirm deletion:",
+        key="delete_wallet_confirm"
+    )
+
+    # Step 3: Deletion button (only enabled if confirm matches del_user)
+    delete_disabled = (confirm != del_user)
+    del_col1, del_col2 = st.columns([1, 5])
+    with del_col1:
+        if st.button("Delete Wallet", key="delete_wallet_btn", disabled=delete_disabled):
+            before_count = len(st.session_state["transactions"])
+            st.session_state["transactions"] = st.session_state["transactions"][st.session_state["transactions"]["User"] != del_user]
+            save_csv(st.session_state["transactions"], TX_FILE)
+            append_audit(
+                "DeleteWallet",
+                f"Deleted ALL transactions for user '{del_user}' ({before_count - len(st.session_state['transactions'])} removed)",
+                ADMIN_USER,
+            )
+            st.success(f"All transactions for '{del_user}' have been permanently deleted.")
+            st.rerun()
+    with del_col2:
+        st.info("Button enabled only when username is typed exactly.")
+
+    if confirm and (confirm != del_user):
+        st.error("Username does not match. Deletion not enabled.")
+else:
+    st.info("No wallets available for deletion.")
+
 # -- NAV input --
 st.markdown("### Edit Fund NAV per Day")
 today = date.today()
