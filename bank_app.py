@@ -10,8 +10,9 @@ TX_FILE = os.path.join(DATA_DIR, "transactions.csv")
 NAV_FILE = os.path.join(DATA_DIR, "nav.csv")
 AUDIT_FILE = os.path.join(DATA_DIR, "audit.csv")
 
-ADMIN_USER = "Admin"
-ADMIN_PASS = "AdminPOEconomics"
+# --- Use secrets for admin password ---
+ADMIN_USER = st.secrets["admin"]["username"] if "admin" in st.secrets else "Admin"
+ADMIN_PASS = st.secrets["admin"]["password"] if "admin" in st.secrets else "AdminPOEconomics"
 START_DATE = date(2025, 5, 18)
 DEFAULT_WITHDRAW_FEE = 0.03
 DEFAULT_PROFIT_FEE = 0.02
@@ -83,7 +84,6 @@ def admin_logout():
 
 # ==== CALCULATION LOGIC ====
 def recalculate_fund(transactions, nav_history, withdraw_fee, profit_fee):
-    # Defensive: Ensure Amounts are float
     if "Amount" in transactions:
         transactions["Amount"] = pd.to_numeric(transactions["Amount"], errors="coerce").fillna(0.0)
 
@@ -132,10 +132,10 @@ def recalculate_fund(transactions, nav_history, withdraw_fee, profit_fee):
     fee_details = {}
     for u in user_shares:
         gross = user_value[u]
-        withdrawal_fee = gross * withdraw_fee
+        withdrawal_fee_amt = gross * withdraw_fee
         profit_fee_amt = max(profit[u], 0) * profit_fee
-        after_fees[u] = gross - withdrawal_fee - profit_fee_amt
-        fee_details[u] = {"withdrawal_fee": withdrawal_fee, "profit_fee": profit_fee_amt}
+        after_fees[u] = gross - withdrawal_fee_amt - profit_fee_amt
+        fee_details[u] = {"withdrawal_fee": withdrawal_fee_amt, "profit_fee": profit_fee_amt}
     ledger_df = pd.DataFrame(share_ledger)
     return nav_per_share, user_shares, user_value, after_fees, profit, ledger_df, fee_details
 
