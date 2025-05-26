@@ -82,52 +82,90 @@ def admin_logout():
     append_audit("AdminLogout", "Logged out", ADMIN_USER)
     st.rerun()
 
-# ==== CALCULATION LOGIC ====
+# ==== CORRECTED CALCULATION LOGIC ====
 def recalculate_fund(transactions, nav_history, withdraw_fee, profit_fee):
+    # Ensure Amount column is numeric
     if "Amount" in transactions:
         transactions["Amount"] = pd.to_numeric(transactions["Amount"], errors="coerce").fillna(0.0)
+
+    # Sort transactions by Date and then by their original order for consistency
+    transactions = transactions.copy().sort_values(["Date", "User"]).reset_index(drop=True)
 
     all_dates = sorted(set(nav_history.keys()) | set(transactions["Date"].astype(str).unique()))
     if not all_dates:
         return {}, {}, {}, {}, {}, pd.DataFrame(), {}
+
     nav_per_share = {}
-    total_shares = 0
+    total_shares = 0.0
+    nav = 0.0
+    user_share_balances = {}
     share_ledger = []
-    user_share_balances = {u: 0.0 for u in transactions["User"].unique() if u}
+    users = transactions["User"].unique()
+
+    # For profit calculation
+    deposit_sum = {u: 0.0 for u in users}
+    withdrawal_sum = {u: 0.0 for u in users}
+
+    prev_nav = None
+
     for d in all_dates:
         d_str = str(d)
-        nav = float(nav_history.get(d_str, np.nan))
-        txs_today = transactions[transactions["Date"].astype(str) == d_str]
+        # Start-of-day NAV is previous day's end NAV unless this is the first day
+        if prev_nav is None:
+            nav = float(nav_history.get(d_str, 0.0))
+        else:
+            nav = float(nav_history.get(d_str, prev_nav))
+        prev_nav = nav
+
+        # Calculate NAV/share BEFORE any transactions for today
         nav_per_share_today = nav / total_shares if total_shares > 0 else 1.0
-        for i, row in txs_today.iterrows():
+
+        # Process all transactions today, in order
+        txs_today = transactions[transactions["Date"].astype(str) == d_str]
+        for idx, row in txs_today.iterrows():
             amt = float(row["Amount"])
             u = row["User"]
             ttype = row["Type"]
+            nav_per_share_now = nav / total_shares if total_shares > 0 else 1.0
+
             if ttype == "Deposit":
-                shares = amt / nav_per_share_today if nav_per_share_today > 0 else 0
+                shares = amt / nav_per_share_now if nav_per_share_now > 0 else 0.0
                 total_shares += shares
+                nav += amt  # Increase fund NAV by deposit
                 user_share_balances[u] = user_share_balances.get(u, 0.0) + shares
+                deposit_sum[u] = deposit_sum.get(u, 0.0) + amt
             elif ttype == "Withdrawal":
-                shares = amt / nav_per_share_today if nav_per_share_today > 0 else 0
+                shares = amt / nav_per_share_now if nav_per_share_now > 0 else 0.0
                 shares = min(shares, user_share_balances.get(u, 0.0))
-                amt = shares * nav_per_share_today
+                payout = shares * nav_per_share_now
                 total_shares -= shares
+                nav -= payout  # Decrease NAV by payout
                 user_share_balances[u] = user_share_balances.get(u, 0.0) - shares
-                amt = -amt
+                withdrawal_sum[u] = withdrawal_sum.get(u, 0.0) + payout
+                amt = -payout  # For reporting, withdrawal amount is negative
             else:
                 continue
+
             share_ledger.append({
                 "Date": d_str, "User": u, "Type": ttype, "Amount": amt,
-                "Shares": shares, "NAV/Share": nav_per_share_today
+                "Shares": shares, "NAV/Share": nav_per_share_now
             })
+
+        # Save the NAV/share at END of day
         nav_per_share[d_str] = nav / total_shares if total_shares > 0 else 1.0
-    user_shares = {u: user_share_balances[u] for u in user_share_balances}
-    current_nav_share = nav_per_share.get(all_dates[-1], 1.0)
-    user_value = {u: user_shares[u] * current_nav_share for u in user_shares}
-    deposit_sum = transactions[transactions["Type"]=="Deposit"].groupby("User")["Amount"].sum().to_dict()
-    withdrawal_series = transactions[transactions["Type"]=="Withdrawal"].groupby("User")["Amount"].sum()
-    withdrawal_sum = {u: -v for u, v in withdrawal_series.to_dict().items()}
-    profit = {u: user_value[u] - deposit_sum.get(u, 0.0) + withdrawal_sum.get(u, 0.0) for u in user_shares}
+        prev_nav = nav
+
+    # Calculate current value of every user's shares
+    final_nav_share = nav_per_share.get(all_dates[-1], 1.0)
+    user_shares = {u: user_share_balances.get(u, 0.0) for u in user_share_balances}
+    user_value = {u: user_shares[u] * final_nav_share for u in user_shares}
+
+    # Compute profit
+    profit = {}
+    for u in user_shares:
+        profit[u] = user_value[u] - deposit_sum.get(u, 0.0) + withdrawal_sum.get(u, 0.0)
+
+    # After-fee calculation
     after_fees = {}
     fee_details = {}
     for u in user_shares:
@@ -136,6 +174,7 @@ def recalculate_fund(transactions, nav_history, withdraw_fee, profit_fee):
         profit_fee_amt = max(profit[u], 0) * profit_fee
         after_fees[u] = gross - withdrawal_fee_amt - profit_fee_amt
         fee_details[u] = {"withdrawal_fee": withdrawal_fee_amt, "profit_fee": profit_fee_amt}
+
     ledger_df = pd.DataFrame(share_ledger)
     return nav_per_share, user_shares, user_value, after_fees, profit, ledger_df, fee_details
 
