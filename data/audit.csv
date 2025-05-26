@@ -1,7 +1,0 @@
-Timestamp,Action,Details,Admin
-2025-05-26 16:38:57,AdminLogin,Logged in,Admin
-2025-05-26 16:39:15,AddTx,Deposit 100.0 for Me on 2025-05-18,Admin
-2025-05-26 16:41:34,AdminLogin,Logged in,Admin
-2025-05-26 16:42:25,SaveNAV,NAVs saved.,Admin
-2025-05-26 16:42:27,AdminLogout,Logged out,Admin
-2025-05-26 16:43:13,AdminLogin,Logged in,Admin
